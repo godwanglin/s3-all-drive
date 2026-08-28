@@ -98,6 +98,7 @@ model Bucket {
   usedBytes BigInt   @default(0)
   isActive  Boolean  @default(true)
   isPublic  Boolean  @default(false)
+  corsOrigins Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)

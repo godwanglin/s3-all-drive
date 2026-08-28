@@ -87,7 +87,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
   const create = () => {
     setForm(
       mode === "buckets"
-        ? { name: "", slug: "", max_bytes: "" }
+        ? { name: "", slug: "", max_bytes: "", is_public: false, cors_origins: "" }
         : mode === "keys"
         ? { name: "", bucket_id: buckets[0]?.id || "", permissions: ["file:read"] }
         : mode === "domains"
@@ -327,6 +327,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                         <th>Name</th>
                         <th>Slug</th>
                         <th>Usage</th>
+                        <th>CORS</th>
                         <th>Status</th>
                         <th />
                       </>
@@ -356,6 +357,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                           <td>{row.name}</td>
                           <td>{row.slug}</td>
                           <td>{bytes(row.used_bytes)} / {row.max_bytes ? bytes(row.max_bytes) : "unlimited"}</td>
+                          <td>{Array.isArray(row.cors_origins) && row.cors_origins.length ? row.cors_origins.join(", ") : "-"}</td>
                           <td><button className={`bucket-visibility-toggle ${row.is_public ? "public" : ""}`} disabled={updatingPublicBucket === row.id} onClick={() => void toggleBucketPublic(row)}>{updatingPublicBucket === row.id ? "Saving..." : row.is_public ? "Public" : "Private"}</button> · {row.is_active ? "Active" : "Inactive"}</td>
                           <td><button onClick={() => setPendingDelete({ kind: "bucket", item: row })}>Delete</button></td>
                         </>
@@ -400,6 +402,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                     <label>Name<input className="glass-input" value={form.name || ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                     <label>Slug<input className="glass-input" value={form.slug || ""} onChange={(event) => setForm({ ...form, slug: event.target.value })} /></label>
                     <label>Max bytes<input className="glass-input" type="number" value={form.max_bytes || ""} onChange={(event) => setForm({ ...form, max_bytes: event.target.value })} /></label>
+                    <label>CORS Origins<textarea className="glass-input" value={form.cors_origins || ""} onChange={(event) => setForm({ ...form, cors_origins: event.target.value })} placeholder="https://weebinhub.com" rows={3} /></label>
                     <label className="permission-check"><input type="checkbox" checked={Boolean(form.is_public)} onChange={(event) => setForm({ ...form, is_public: event.target.checked })} /> Allow public read access for S3 objects</label>
                   </>
                 )}

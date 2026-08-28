@@ -13,9 +13,19 @@ function bucketResponse(bucket: Record<string, unknown>) {
     max_bytes: bucket.maxBytes,
     is_active: bucket.isActive,
     is_public: bucket.isPublic,
+    cors_origins: bucket.corsOrigins || [],
     created_at: bucket.createdAt,
     updated_at: bucket.updatedAt,
   });
+}
+
+function parseCorsOrigins(value: unknown) {
+  if (typeof value !== "string") return [];
+  return value
+    .split(/[\n,]/)
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .filter((origin, index, origins) => origins.indexOf(origin) === index);
 }
 
 export async function GET(request: NextRequest) {
@@ -43,7 +53,7 @@ export async function POST(request: NextRequest) {
   if (maxBytes !== null && maxBytes <= BigInt(0)) return errorResponse("VALIDATION_ERROR", "Max bytes must be greater than zero.", 400);
   try {
     const bucket = await (prisma as any).bucket.create({
-      data: { ownerId: user.id, name, slug, maxBytes },
+      data: { ownerId: user.id, name, slug, maxBytes, isPublic: Boolean(body.is_public), corsOrigins: parseCorsOrigins(body.cors_origins) },
     });
     return successResponse(bucketResponse(bucket), 201);
   } catch {

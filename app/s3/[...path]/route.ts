@@ -32,6 +32,17 @@ function getStreamingCacheControl(key: string) {
   return "public, max-age=3600, stale-while-revalidate=86400";
 }
 
+function applyCorsHeaders(headers: Headers, request: NextRequest, bucket: { corsOrigins?: unknown }) {
+  const requestOrigin = request.headers.get("origin");
+  const corsOrigins = Array.isArray(bucket.corsOrigins) ? bucket.corsOrigins.filter((origin): origin is string => typeof origin === "string") : [];
+  if (!requestOrigin || !corsOrigins.includes(requestOrigin)) return;
+  headers.set("Access-Control-Allow-Origin", requestOrigin);
+  headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Range, Content-Type, Authorization, x-amz-date, x-amz-content-sha256");
+  headers.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Cache-Control, ETag, Last-Modified");
+  headers.set("Vary", "Origin");
+}
+
 export async function PUT(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const auth = await verifyS3Request(request, "file:create");
   if (!auth) return xml("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", 403);
@@ -167,6 +178,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
     "Content-Disposition": `inline; filename="${object.name}"`,
   });
   if (upstream.headers.get("content-range")) headers.set("Content-Range", upstream.headers.get("content-range")!);
+  applyCorsHeaders(headers, request, auth.bucket);
   return new NextResponse(upstream.body, { status: upstream.status, headers });
 }
 
@@ -179,17 +191,26 @@ export async function HEAD(request: NextRequest, context: { params: Promise<{ pa
     where: { bucketId: auth.bucketId, logicalPath: key, status: "AVAILABLE" },
   });
   if (!object) return new NextResponse(null, { status: 404 });
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      "Content-Type": object.mimeType || "application/octet-stream",
-      "Content-Length": String(object.fileSize),
-      "Accept-Ranges": "bytes",
-      "Cache-Control": getStreamingCacheControl(key),
-      ETag: `"${createHash("md5").update(object.logicalPath).digest("hex")}"`,
-      "Last-Modified": new Date(object.updatedAt).toUTCString(),
-    },
+  const headers = new Headers({
+    "Content-Type": object.mimeType || "application/octet-stream",
+    "Content-Length": String(object.fileSize),
+    "Accept-Ranges": "bytes",
+    "Cache-Control": getStreamingCacheControl(key),
+    ETag: `"${createHash("md5").update(object.logicalPath).digest("hex")}"`,
+    "Last-Modified": new Date(object.updatedAt).toUTCString(),
   });
+  applyCorsHeaders(headers, request, auth.bucket);
+  return new NextResponse(null, { status: 200, headers });
+}
+
+export async function OPTIONS(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const auth = await verifyS3Request(request, "file:read");
+  if (!auth) return new NextResponse(null, { status: 403 });
+  const { bucket } = parsePath((await context.params).path);
+  if (bucket !== auth.bucket.slug) return new NextResponse(null, { status: 404 });
+  const headers = new Headers();
+  applyCorsHeaders(headers, request, auth.bucket);
+  return new NextResponse(null, { status: headers.has("Access-Control-Allow-Origin") ? 204 : 403, headers });
 }
 
 export async function DELETE(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {

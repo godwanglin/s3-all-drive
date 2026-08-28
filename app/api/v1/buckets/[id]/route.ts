@@ -3,6 +3,15 @@ import { errorResponse, successResponse } from "@/lib/api-response";
 import { getAuthUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
+function parseCorsOrigins(value: unknown) {
+  if (typeof value !== "string") return undefined;
+  return value
+    .split(/[\n,]/)
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+    .filter((origin, index, origins) => origins.indexOf(origin) === index);
+}
+
 export async function GET(_: NextRequest, context: { params: Promise<{ id: string }> }) {
   const user = await getAuthUser();
   if (!user) return errorResponse("UNAUTHORIZED", "Authentication required.", 401);
@@ -26,6 +35,8 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
   if (body.max_bytes !== undefined) data.maxBytes = body.max_bytes === null ? null : BigInt(body.max_bytes);
   if (typeof body.is_active === "boolean") data.isActive = body.is_active;
   if (typeof body.is_public === "boolean") data.isPublic = body.is_public;
+  const corsOrigins = parseCorsOrigins(body.cors_origins);
+  if (corsOrigins) data.corsOrigins = corsOrigins;
   const result = await (prisma as any).bucket.updateMany({ where: { id, ownerId: user.id }, data });
   if (!result.count) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
   return successResponse({ updated: true });
