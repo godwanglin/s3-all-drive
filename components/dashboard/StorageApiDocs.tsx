@@ -15,7 +15,7 @@ const source = [
 "Semua request API memakai API key pada header berikut:",
 "",
 "~~~http",
-"Authorization: Bearer sk_live_redacted_example",
+"Authorization: Bearer $API_KEY",
 "~~~",
 "",
 "## Quickstart",
