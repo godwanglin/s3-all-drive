@@ -1752,6 +1752,26 @@ td {
   border: 1px solid #10b981;
   margin-bottom: 16px;
 }
+
+.bucket-visibility-toggle {
+  padding: 5px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.bucket-visibility-toggle.public {
+  border-color: rgba(45, 212, 191, 0.35);
+  background: rgba(20, 184, 166, 0.12);
+  color: #99f6e4;
+}
+
+.bucket-visibility-toggle:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
 .storage-error {
   display: flex;
   justify-content: space-between;

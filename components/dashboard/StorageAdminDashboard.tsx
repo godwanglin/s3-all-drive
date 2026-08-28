@@ -46,6 +46,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
   const [selectedBucket, setSelectedBucket] = useState("");
   const [folderPath, setFolderPath] = useState<{ id: string | null; name: string }[]>([{ id: null, name: "Root" }]);
   const [newFolderName, setNewFolderName] = useState("");
+  const [updatingPublicBucket, setUpdatingPublicBucket] = useState("");
   const currentFolderId = folderPath[folderPath.length - 1].id;
 
   const load = async () => {
@@ -108,6 +109,23 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Save failed");
+    }
+  };
+
+  const toggleBucketPublic = async (bucket: Row) => {
+    setUpdatingPublicBucket(bucket.id);
+    setError("");
+    try {
+      await api(`/api/v1/buckets/${bucket.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ is_public: !bucket.is_public }),
+      });
+      setRows((current) => current.map((item) => item.id === bucket.id ? { ...item, is_public: !bucket.is_public } : item));
+      setBuckets((current) => current.map((item) => item.id === bucket.id ? { ...item, is_public: !bucket.is_public } : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to update bucket visibility");
+    } finally {
+      setUpdatingPublicBucket("");
     }
   };
 
@@ -338,7 +356,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                           <td>{row.name}</td>
                           <td>{row.slug}</td>
                           <td>{bytes(row.used_bytes)} / {row.max_bytes ? bytes(row.max_bytes) : "unlimited"}</td>
-                          <td>{row.is_public ? "Public" : "Private"} · {row.is_active ? "Active" : "Inactive"}</td>
+                          <td><button className={`bucket-visibility-toggle ${row.is_public ? "public" : ""}`} disabled={updatingPublicBucket === row.id} onClick={() => void toggleBucketPublic(row)}>{updatingPublicBucket === row.id ? "Saving..." : row.is_public ? "Public" : "Private"}</button> · {row.is_active ? "Active" : "Inactive"}</td>
                           <td><button onClick={() => setPendingDelete({ kind: "bucket", item: row })}>Delete</button></td>
                         </>
                       )}
