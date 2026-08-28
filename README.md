@@ -90,6 +90,50 @@ Operasi yang didukung: `PutObject`, `GetObject`, `HeadObject`, `ListObjectsV2`, 
 
 API native tetap tersedia di `/api/v1` untuk operasi bucket, folder, object, video, API key, dan custom domain. Dokumentasi interaktif dapat dibuka dari `/dashboard/docs` setelah login.
 
+## Public URL Lifetime
+
+Buat URL publik object melalui endpoint berikut:
+
+```http
+POST /api/v1/objects/{object_id}/public-url
+Authorization: Bearer $API_KEY
+Content-Type: application/json
+```
+
+Body boleh kosong. Response berisi URL publik yang tidak memiliki expiry:
+
+```json
+{
+  "url": "https://example.com/public/{token}/{filename}",
+  "expires_at": null,
+  "lifetime": true
+}
+```
+
+URL tetap aktif tanpa batas waktu sampai public access dicabut secara manual:
+
+```http
+DELETE /api/v1/objects/{object_id}/public-url
+Authorization: Bearer $API_KEY
+```
+
+Catatan: URL lifetime tetap bergantung pada object yang tersedia dan akun Google Drive yang terhubung. URL tidak otomatis expired, tetapi dapat dinonaktifkan dengan endpoint revoke.
+
+## AI Agent Quick Reference
+
+Instruksi singkat untuk AI agent:
+
+```text
+AllDrive Storage adalah S3-compatible object storage dengan Google Drive sebagai provider.
+S3 endpoint: https://YOUR_DOMAIN/s3
+Gunakan AWS SDK v3, region us-east-1, dan forcePathStyle true.
+Bucket API key menentukan bucket tujuan.
+Key nested seperti folder-a/folder-b/file.png otomatis membuat folder.
+Gunakan PUT/GET/HEAD/LIST/DELETE sesuai operasi S3.
+Public URL dibuat lewat POST /api/v1/objects/{id}/public-url dan lifetime sampai direvoke.
+Jangan meminta atau menampilkan secret API key di log.
+```
+
 ## Keamanan
 
 - Jangan commit `.env` atau credential Google/API key.
