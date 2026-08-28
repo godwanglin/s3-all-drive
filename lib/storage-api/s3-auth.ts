@@ -19,6 +19,10 @@ function getSignatureKey(key: string, dateStamp: string, regionName: string, ser
   return createHmac("sha256", kService).update("aws4_request", "utf8").digest();
 }
 
+function encodeAws(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
 export async function verifyS3Request(request: NextRequest, permission?: string) {
   const auth = request.headers.get("authorization") || "";
   const pathname = new URL(request.url).pathname;
@@ -46,10 +50,14 @@ export async function verifyS3Request(request: NextRequest, permission?: string)
     .join("");
 
   const url = new URL(request.url);
-  const canonicalUri = encodeURI(url.pathname);
+  const canonicalUri = url.pathname
+    .split("/")
+    .map((segment) => encodeAws(decodeURIComponent(segment)))
+    .join("/");
   const canonicalQuery = Array.from(url.searchParams.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .map(([k, v]) => [encodeAws(k), encodeAws(v)] as const)
+    .sort(([firstKey, firstValue], [secondKey, secondValue]) => firstKey.localeCompare(secondKey) || firstValue.localeCompare(secondValue))
+    .map(([k, v]) => `${k}=${v}`)
     .join("&");
 
   const payloadHash = request.headers.get("x-amz-content-sha256") || "UNSIGNED-PAYLOAD";
