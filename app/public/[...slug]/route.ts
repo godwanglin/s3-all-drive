@@ -5,6 +5,15 @@ import { fetchDriveMediaStream } from "@/lib/google-drive/direct-stream";
 
 const metaCache = new Map<string, { data: any; expiresAt: number }>();
 
+function getStreamingCacheControl(name: string) {
+  const lowerName = name.toLowerCase();
+  if (lowerName.endsWith(".m3u8")) return "public, max-age=5, s-maxage=30, stale-while-revalidate=300";
+  if (lowerName.endsWith(".ts") || lowerName.endsWith(".m4s") || lowerName.endsWith(".mp4")) {
+    return "public, max-age=31536000, immutable";
+  }
+  return "public, max-age=3600, stale-while-revalidate=86400";
+}
+
 export async function GET(request: NextRequest, context: { params: Promise<{ slug: string[] }> }) {
   const { slug } = await context.params;
   const token = slug?.[0];
@@ -38,8 +47,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ slu
       "Content-Type": object.mimeType || upstream.headers.get("content-type") || "application/octet-stream",
       "Content-Disposition": `inline; filename="${encodeURIComponent(object.name)}"`,
       "Accept-Ranges": "bytes",
-      "Cache-Control": "public, max-age=3600",
+      "Cache-Control": getStreamingCacheControl(object.name),
     });
+    if (upstream.headers.get("etag")) headers.set("ETag", upstream.headers.get("etag")!);
     for (const name of ["content-range", "content-length", "etag", "last-modified"]) {
       const value = upstream.headers.get(name);
       if (value) headers.set(name, value);

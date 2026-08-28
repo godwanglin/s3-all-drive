@@ -23,6 +23,15 @@ function parsePath(path: string[]) {
   };
 }
 
+function getStreamingCacheControl(key: string) {
+  const lowerKey = key.toLowerCase();
+  if (lowerKey.endsWith(".m3u8")) return "public, max-age=5, s-maxage=30, stale-while-revalidate=300";
+  if (lowerKey.endsWith(".ts") || lowerKey.endsWith(".m4s") || lowerKey.endsWith(".mp4")) {
+    return "public, max-age=31536000, immutable";
+  }
+  return "public, max-age=3600, stale-while-revalidate=86400";
+}
+
 export async function PUT(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const auth = await verifyS3Request(request, "file:create");
   if (!auth) return xml("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", 403);
@@ -154,6 +163,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
     "Content-Type": object.mimeType || "application/octet-stream",
     "Content-Length": upstream.headers.get("content-length") || String(object.fileSize),
     "Accept-Ranges": "bytes",
+    "Cache-Control": getStreamingCacheControl(key),
     "Content-Disposition": `inline; filename="${object.name}"`,
   });
   if (upstream.headers.get("content-range")) headers.set("Content-Range", upstream.headers.get("content-range")!);
@@ -175,6 +185,7 @@ export async function HEAD(request: NextRequest, context: { params: Promise<{ pa
       "Content-Type": object.mimeType || "application/octet-stream",
       "Content-Length": String(object.fileSize),
       "Accept-Ranges": "bytes",
+      "Cache-Control": getStreamingCacheControl(key),
       ETag: `"${createHash("md5").update(object.logicalPath).digest("hex")}"`,
       "Last-Modified": new Date(object.updatedAt).toUTCString(),
     },
