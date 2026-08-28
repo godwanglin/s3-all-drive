@@ -338,7 +338,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                           <td>{row.name}</td>
                           <td>{row.slug}</td>
                           <td>{bytes(row.used_bytes)} / {row.max_bytes ? bytes(row.max_bytes) : "unlimited"}</td>
-                          <td>{row.is_active ? "Active" : "Inactive"}</td>
+                          <td>{row.is_public ? "Public" : "Private"} · {row.is_active ? "Active" : "Inactive"}</td>
                           <td><button onClick={() => setPendingDelete({ kind: "bucket", item: row })}>Delete</button></td>
                         </>
                       )}
@@ -382,6 +382,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                     <label>Name<input className="glass-input" value={form.name || ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
                     <label>Slug<input className="glass-input" value={form.slug || ""} onChange={(event) => setForm({ ...form, slug: event.target.value })} /></label>
                     <label>Max bytes<input className="glass-input" type="number" value={form.max_bytes || ""} onChange={(event) => setForm({ ...form, max_bytes: event.target.value })} /></label>
+                    <label className="permission-check"><input type="checkbox" checked={Boolean(form.is_public)} onChange={(event) => setForm({ ...form, is_public: event.target.checked })} /> Allow public read access for S3 objects</label>
                   </>
                 )}
                 {mode === "keys" && (

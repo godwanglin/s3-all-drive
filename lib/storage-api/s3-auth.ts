@@ -21,6 +21,12 @@ function getSignatureKey(key: string, dateStamp: string, regionName: string, ser
 
 export async function verifyS3Request(request: NextRequest, permission?: string) {
   const auth = request.headers.get("authorization") || "";
+  const pathname = new URL(request.url).pathname;
+  const bucketSlug = pathname.split("/").filter(Boolean)[1];
+  if (!auth && (request.method === "GET" || request.method === "HEAD") && bucketSlug) {
+    const publicBucket = await (prisma as any).bucket.findFirst({ where: { slug: decodeURIComponent(bucketSlug), isActive: true, isPublic: true } });
+    if (publicBucket) return { apiKey: null, ownerId: publicBucket.ownerId, bucketId: publicBucket.id, bucket: publicBucket, public: true };
+  }
   const match = /AWS4-HMAC-SHA256\s+Credential=([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/aws4_request,\s*SignedHeaders=([^,]+),\s*Signature=([a-f0-9]+)/i.exec(auth);
   if (!match) return null;
 

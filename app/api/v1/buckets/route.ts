@@ -12,6 +12,7 @@ function bucketResponse(bucket: Record<string, unknown>) {
     used_bytes: bucket.usedBytes,
     max_bytes: bucket.maxBytes,
     is_active: bucket.isActive,
+    is_public: bucket.isPublic,
     created_at: bucket.createdAt,
     updated_at: bucket.updatedAt,
   });

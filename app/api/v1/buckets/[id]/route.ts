@@ -25,6 +25,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
   if (typeof body.slug === "string" && body.slug.trim()) data.slug = body.slug.trim().toLowerCase();
   if (body.max_bytes !== undefined) data.maxBytes = body.max_bytes === null ? null : BigInt(body.max_bytes);
   if (typeof body.is_active === "boolean") data.isActive = body.is_active;
+  if (typeof body.is_public === "boolean") data.isPublic = body.is_public;
   const result = await (prisma as any).bucket.updateMany({ where: { id, ownerId: user.id }, data });
   if (!result.count) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
   return successResponse({ updated: true });

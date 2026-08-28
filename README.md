@@ -86,6 +86,26 @@ aws s3 cp ./file.txt s3://test-bucket/docs/file.txt \
 
 Operasi yang didukung: `PutObject`, `GetObject`, `HeadObject`, `ListObjectsV2`, `DeleteObject`, dan `DeleteObjects`. Permission API key diterapkan pada gateway: upload memakai `file:create`, baca/list memakai `file:read`, dan hapus memakai `file:delete`.
 
+### Public Bucket untuk HLS
+
+Bucket dapat diatur menjadi **Public** dari dashboard atau API bucket. Default-nya `false`. Saat `is_public=true`, hanya operasi read (`GET`, `HEAD`, dan `LIST`) yang dapat dilakukan tanpa credential. Upload dan delete tetap wajib menggunakan AWS Signature V4.
+
+```http
+PUT /api/v1/buckets/{bucket_id}
+Authorization: Bearer $API_KEY
+Content-Type: application/json
+
+{"is_public": true}
+```
+
+Object publik dapat diakses dengan pola berikut, termasuk playlist dan segment HLS:
+
+```text
+https://YOUR_DOMAIN/s3/{bucket-name}/{key-path}
+```
+
+Contoh: `https://YOUR_DOMAIN/s3/weebin-storage/videos/demo/master.m3u8`. Siapa pun yang mengetahui URL dapat membaca object di bucket publik.
+
 ## Endpoint API Native
 
 API native tetap tersedia di `/api/v1` untuk operasi bucket, folder, object, video, API key, dan custom domain. Dokumentasi interaktif dapat dibuka dari `/dashboard/docs` setelah login.
