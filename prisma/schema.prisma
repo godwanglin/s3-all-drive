@@ -165,6 +165,7 @@ model StorageFolder {
   parentId  String?
   name      String         @db.VarChar(255)
   path      String         @db.VarChar(500)
+  isVirtual Boolean        @default(false)
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   bucket    Bucket         @relation(fields: [bucketId], references: [id], onDelete: Cascade)

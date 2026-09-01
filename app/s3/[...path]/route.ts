@@ -83,7 +83,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pat
     if (!folder) {
       try {
         folder = await (prisma as any).storageFolder.create({
-          data: { bucketId: auth.bucketId, parentId: folderId, name: folderName, path: folderPath },
+          data: { bucketId: auth.bucketId, parentId: folderId, name: folderName, path: folderPath, isVirtual: true },
         });
       } catch {
         folder = await (prisma as any).storageFolder.findFirst({
