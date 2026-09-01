@@ -161,4 +161,5 @@ export async function deleteProviderPrefix(provider: any, prefix: string) {
     for (const key of keys) await client.send(new DeleteObjectCommand({ Bucket: provider.bucketName, Key: key }));
     continuationToken = response.NextContinuationToken;
   } while (continuationToken);
+  await client.send(new DeleteObjectCommand({ Bucket: provider.bucketName, Key: normalizedPrefix })).catch(() => undefined);
 }
