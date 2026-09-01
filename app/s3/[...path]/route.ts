@@ -48,6 +48,20 @@ function applyCorsHeaders(headers: Headers, request: NextRequest, bucket: { cors
   headers.set("Vary", "Origin");
 }
 
+async function removeEmptyFolders(bucketId: string) {
+  const folders = await (prisma as any).storageFolder.findMany({
+    where: { bucketId },
+    select: { id: true, path: true },
+    orderBy: { path: "desc" },
+  });
+  for (const folder of folders) {
+    const objectCount = await (prisma as any).storageObject.count({
+      where: { bucketId, folderId: folder.id, status: { not: "DELETED" } },
+    });
+    if (!objectCount) await (prisma as any).storageFolder.delete({ where: { id: folder.id } }).catch(() => undefined);
+  }
+}
+
 export async function PUT(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const auth = await verifyS3Request(request, "file:create");
   if (!auth) return xml("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", 403);
@@ -316,12 +330,14 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       await tx.storageFolder.deleteMany({ where: { bucketId: auth.bucketId, OR: [{ path: prefix.slice(0, -1) }, { path: { startsWith: prefix } }] } });
       if (deletedBytes > BigInt(0)) await tx.bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: deletedBytes } } });
     });
+    await removeEmptyFolders(auth.bucketId);
     return new NextResponse(null, { status: 204 });
   }
   if (object) {
     await deleteObjectFromProvider(object, auth.ownerId);
     await (prisma as any).storageObject.update({ where: { id: object.id }, data: { status: "DELETED" } });
     await (prisma as any).bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: object.fileSize } } });
+    await removeEmptyFolders(auth.bucketId);
   }
   return new NextResponse(null, { status: 204 });
 }
