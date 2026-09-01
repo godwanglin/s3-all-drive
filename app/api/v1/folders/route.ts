@@ -3,6 +3,23 @@ import { errorResponse, successResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { getSessionOrApiKey } from "@/lib/storage-api/auth";
 
+async function pruneEmptyVideoFolders(bucketId: string) {
+  const folders = await (prisma as any).storageFolder.findMany({
+    where: { bucketId, path: { startsWith: "videos/" } },
+    select: { id: true },
+    orderBy: { path: "desc" },
+  });
+  for (const folder of folders) {
+    const [objects, children] = await Promise.all([
+      (prisma as any).storageObject.count({ where: { folderId: folder.id, status: { not: "DELETED" } } }),
+      (prisma as any).storageFolder.count({ where: { parentId: folder.id } }),
+    ]);
+    if (!objects && !children) {
+      await (prisma as any).storageFolder.delete({ where: { id: folder.id } }).catch(() => undefined);
+    }
+  }
+}
+
 export async function GET(request: NextRequest) {
   const auth = await getSessionOrApiKey(request, "folder:read");
   if ("error" in auth) return errorResponse(auth.error, "Unauthorized", auth.status);
@@ -10,6 +27,7 @@ export async function GET(request: NextRequest) {
   if (!bucketId) return errorResponse("BUCKET_NOT_FOUND", "Bucket is required.", 404);
   const bucket = await (prisma as any).bucket.findFirst({ where: { id: bucketId, ownerId: auth.ownerId, isActive: true } });
   if (!bucket) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
+  await pruneEmptyVideoFolders(bucketId);
   const parentId = request.nextUrl.searchParams.get("parent_id");
   const folders = await (prisma as any).storageFolder.findMany({ where: { bucketId, parentId: parentId || null }, orderBy: { name: "asc" } });
   return successResponse({ folders });
