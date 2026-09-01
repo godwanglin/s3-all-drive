@@ -38,6 +38,28 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const { id } = await context.params;
   const object = await findObject(id, auth.ownerId, auth.bucketId || request.nextUrl.searchParams.get("bucket_id") || undefined);
   if (!object) return errorResponse("NOT_FOUND", "Object not found.", 404);
+  const videoPrefixMatch = object.logicalPath.match(/^videos\/([A-Za-z0-9_-]+)\/.+/);
+  if (videoPrefixMatch) {
+    const prefix = `videos/${videoPrefixMatch[1]}/`;
+    const objects = await (prisma as any).storageObject.findMany({
+      where: { bucketId: object.bucketId, logicalPath: { startsWith: prefix }, status: { not: "DELETED" } },
+    });
+    await Promise.all(objects.map((item: any) => deleteObjectFromProvider(item, auth.ownerId)));
+    const deletedBytes = objects.reduce((sum: bigint, item: any) => sum + item.fileSize, BigInt(0));
+    await (prisma as any).$transaction(async (tx: any) => {
+      await tx.storageObject.updateMany({
+        where: { id: { in: objects.map((item: any) => item.id) } },
+        data: { status: "DELETED" },
+      });
+      await tx.storageFolder.deleteMany({
+        where: { bucketId: object.bucketId, OR: [{ path: prefix.slice(0, -1) }, { path: { startsWith: prefix } }] },
+      });
+      if (deletedBytes > BigInt(0)) {
+        await tx.bucket.update({ where: { id: object.bucketId }, data: { usedBytes: { decrement: deletedBytes } } });
+      }
+    });
+    return successResponse({ deleted: true, recursive: true, prefix, objects: objects.length });
+  }
   await deleteObjectFromProvider(object, auth.ownerId);
   await (prisma as any).$transaction(async (tx: any) => {
     await tx.storageObject.update({ where: { id }, data: { status: "DELETED" } });
