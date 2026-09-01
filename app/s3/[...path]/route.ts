@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { verifyS3Request } from "@/lib/storage-api/s3-auth";
-import { deleteObjectFromProvider, fetchObjectFromProvider, uploadObjectToProvider } from "@/lib/storage-api/provider-backend";
+import { deleteObjectFromProvider, deleteProviderPrefix, fetchObjectFromProvider, uploadObjectToProvider } from "@/lib/storage-api/provider-backend";
 
 const publicObjectCache = new Map<string, { bucket: any; object: any; expiresAt: number }>();
 const PUBLIC_OBJECT_CACHE_TTL = 30_000;
@@ -293,6 +293,31 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const object = await (prisma as any).storageObject.findFirst({
     where: { bucketId: auth.bucketId, logicalPath: key },
   });
+  const videoPrefixMatch = key.match(/^videos\/([A-Za-z0-9_-]+)\/.+/);
+  if (videoPrefixMatch) {
+    const prefix = `videos/${videoPrefixMatch[1]}/`;
+    const objects = await (prisma as any).storageObject.findMany({
+      where: { bucketId: auth.bucketId, logicalPath: { startsWith: prefix }, status: { not: "DELETED" } },
+    });
+    const providers = new Map<string, any>();
+    for (const item of objects) {
+      if (item.storageProviderId && item.storageKey?.startsWith(prefix) && !providers.has(item.storageProviderId)) {
+        const provider = await (prisma as any).storageProvider.findFirst({
+          where: { id: item.storageProviderId, ownerId: auth.ownerId, isActive: true },
+        });
+        if (provider) providers.set(provider.id, provider);
+      }
+    }
+    for (const provider of providers.values()) await deleteProviderPrefix(provider, prefix);
+    await Promise.all(objects.map((item: any) => item.providerAccountId && item.providerFileId ? deleteObjectFromProvider(item, auth.ownerId) : Promise.resolve()));
+    const deletedBytes = objects.reduce((sum: bigint, item: any) => sum + item.fileSize, BigInt(0));
+    await (prisma as any).$transaction(async (tx: any) => {
+      await tx.storageObject.updateMany({ where: { id: { in: objects.map((item: any) => item.id) } }, data: { status: "DELETED" } });
+      await tx.storageFolder.deleteMany({ where: { bucketId: auth.bucketId, OR: [{ path: prefix.slice(0, -1) }, { path: { startsWith: prefix } }] } });
+      if (deletedBytes > BigInt(0)) await tx.bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: deletedBytes } } });
+    });
+    return new NextResponse(null, { status: 204 });
+  }
   if (object) {
     await deleteObjectFromProvider(object, auth.ownerId);
     await (prisma as any).storageObject.update({ where: { id: object.id }, data: { status: "DELETED" } });

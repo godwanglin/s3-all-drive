@@ -147,3 +147,18 @@ export async function deleteObjectFromProvider(object: any, ownerId: string) {
   }
   if (object.providerAccountId && object.providerFileId) await deleteFromDrive(ownerId, object.providerAccountId, object.providerFileId);
 }
+
+export async function deleteProviderPrefix(provider: any, prefix: string) {
+  const normalizedPrefix = normalizeStorageKey(prefix);
+  if (!normalizedPrefix.endsWith("/")) throw new Error("INVALID_STORAGE_PREFIX");
+  const client = createS3Client(provider);
+  let continuationToken: string | undefined;
+  do {
+    const response = await client.send(new ListObjectsV2Command({ Bucket: provider.bucketName, Prefix: normalizedPrefix, ContinuationToken: continuationToken }));
+    const keys = (response.Contents || [])
+      .map((item) => item.Key || "")
+      .filter((key) => key.startsWith(normalizedPrefix));
+    for (const key of keys) await client.send(new DeleteObjectCommand({ Bucket: provider.bucketName, Key: key }));
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+}
