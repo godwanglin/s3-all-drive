@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type Mode = "buckets" | "keys" | "storage" | "domains";
+type Mode = "buckets" | "keys" | "storage" | "domains" | "providers";
 type Row = Record<string, any>;
-type PendingDelete = { kind: "bucket" | "key" | "domain" | "folder" | "object"; item: Row };
+type PendingDelete = { kind: "bucket" | "key" | "domain" | "folder" | "object" | "provider"; item: Row };
 type CreatedCredentials = { rawKey: string; accessKeyId: string; secretAccessKey: string };
 const permissions = [
   "file:create", "file:read", "file:update", "file:delete",
@@ -36,11 +36,15 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [folders, setFolders] = useState<Row[]>([]);
   const [buckets, setBuckets] = useState<Row[]>([]);
+  const [providers, setProviders] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [selectedObject, setSelectedObject] = useState<Row | null>(null);
+  const [publicUrl, setPublicUrl] = useState("");
+  const [publicUrlLoading, setPublicUrlLoading] = useState(false);
   const [form, setForm] = useState<Row>({});
   const [createdCredentials, setCreatedCredentials] = useState<CreatedCredentials | null>(null);
   const [selectedBucket, setSelectedBucket] = useState("");
@@ -61,6 +65,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
 
       if (mode === "buckets") setRows(bucketList);
       if (mode === "keys") setRows((await api("/api/v1/api-keys")).api_keys || []);
+      if (mode === "providers") setRows((await api("/api/v1/storage-providers")).providers || []);
       if (mode === "domains") setRows((await api("/api/v1/domains")).domains || []);
       if (mode === "storage" && bucketId) {
         const [folderData, objectData] = await Promise.all([
@@ -82,7 +87,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
   }, [mode, selectedBucket, folderPath]);
 
   const filtered = useMemo(() => rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query.toLowerCase())), [rows, query]);
-  const title = mode === "buckets" ? "Buckets" : mode === "keys" ? "API Keys" : mode === "storage" ? "Object Storage" : "Custom Domains";
+  const title = mode === "buckets" ? "Buckets" : mode === "keys" ? "API Keys" : mode === "storage" ? "Object Storage" : mode === "providers" ? "Storage Providers" : "Custom Domains";
 
   const create = () => {
     setForm(
@@ -92,6 +97,8 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
         ? { name: "", bucket_id: buckets[0]?.id || "", permissions: ["file:read"] }
         : mode === "domains"
         ? { domain: "", bucket_id: "" }
+        : mode === "providers"
+        ? { name: "", endpoint: "", region: "auto", bucket_name: "", access_key_id: "", secret_access_key: "", max_bytes: "", force_path_style: true, is_default: false }
         : {}
     );
     setOpen(true);
@@ -105,6 +112,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
         setCreatedCredentials({ rawKey: result.raw_key, accessKeyId: result.s3_access_key_id, secretAccessKey: result.s3_secret_access_key });
       }
       if (mode === "domains") await api("/api/v1/domains", { method: "POST", body: JSON.stringify(form) });
+      if (mode === "providers") await api("/api/v1/storage-providers", { method: "POST", body: JSON.stringify({ ...form, max_bytes: form.max_bytes ? Math.round(Number(form.max_bytes) * 1024 ** 3) : null }) });
       setOpen(false);
       await load();
     } catch (cause) {
@@ -169,6 +177,8 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
           ? `/api/v1/api-keys/${pendingDelete.item.id}`
           : pendingDelete.kind === "domain"
           ? `/api/v1/domains/${pendingDelete.item.id}`
+          : pendingDelete.kind === "provider"
+          ? `/api/v1/storage-providers/${pendingDelete.item.id}`
           : pendingDelete.kind === "folder"
           ? `/api/v1/folders/${pendingDelete.item.id}?bucket_id=${selectedBucket}`
           : `/api/v1/objects/${pendingDelete.item.id}?bucket_id=${selectedBucket}`;
@@ -177,6 +187,28 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Delete failed");
+    }
+  };
+
+  const generatePublicUrl = async () => {
+    if (!selectedObject) return;
+    setPublicUrlLoading(true);
+    try {
+      const result = await api(`/api/v1/objects/${selectedObject.id}/public-url?bucket_id=${selectedBucket}`, { method: "POST" });
+      setPublicUrl(result.url || "");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to generate public URL");
+    } finally {
+      setPublicUrlLoading(false);
+    }
+  };
+
+  const selectObject = (object: Row) => {
+    setSelectedObject(object);
+    setPublicUrl("");
+    const bucket = buckets.find((item) => item.id === selectedBucket);
+    if (bucket?.is_public) {
+      setPublicUrl(`${window.location.origin}/s3/${encodeURIComponent(bucket.slug)}/${String(object.logicalPath || object.name).split("/").map(encodeURIComponent).join("/")}`);
     }
   };
 
@@ -219,6 +251,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
             <a className={mode === "buckets" ? "active" : ""} href="/dashboard/buckets">Buckets</a>
             <a className={mode === "keys" ? "active" : ""} href="/dashboard/api-keys">API Keys</a>
             <a className={mode === "storage" ? "active" : ""} href="/dashboard/storage">Storage</a>
+            <a className={mode === "providers" ? "active" : ""} href="/dashboard/providers">Providers</a>
             <a className={mode === "domains" ? "active" : ""} href="/dashboard/domains">Domains</a>
             <a href="/dashboard/docs">Docs</a>
           </nav>
@@ -299,17 +332,17 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                     </tr>
                   ))}
                   {filtered.map((row) => (
-                    <tr key={row.id}>
+                    <tr key={row.id} onClick={() => selectObject(row)}>
                       <td>
-                        <a className="storage-name-action file" href={`/api/v1/objects/${row.id}/download?bucket_id=${selectedBucket}`} target="_blank">
+                        <button className="storage-name-action file" onClick={(event) => { event.stopPropagation(); selectObject(row); }}>
                           <span className="material-symbols-rounded">draft</span>{row.name}
-                        </a>
+                        </button>
                       </td>
                       <td>{row.mimeType || "file"}</td>
                       <td>{bytes(row.fileSize)}</td>
                       <td>{row.status}</td>
                       <td className="storage-row-actions">
-                        <button onClick={() => setPendingDelete({ kind: "object", item: row })}>Delete</button>
+                        <button onClick={(event) => { event.stopPropagation(); setPendingDelete({ kind: "object", item: row }); }}>Delete</button>
                       </td>
                     </tr>
                   ))}
@@ -336,6 +369,15 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                         <th>Name</th>
                         <th>Bucket</th>
                         <th>Prefix</th>
+                        <th>Status</th>
+                        <th />
+                      </>
+                    ) : mode === "providers" ? (
+                      <>
+                        <th>Name</th>
+                        <th>Bucket</th>
+                        <th>Endpoint</th>
+                        <th>Usage</th>
                         <th>Status</th>
                         <th />
                       </>
@@ -377,6 +419,16 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                           <td>{row.bucket?.name || "-"}</td>
                           <td>{row.isVerified ? "Verified" : "Unverified"}</td>
                           <td><button onClick={() => setPendingDelete({ kind: "domain", item: row })}>Delete</button></td>
+                        </>
+                      )}
+                      {mode === "providers" && (
+                        <>
+                          <td>{row.name}</td>
+                          <td>{row.bucket_name || "-"}</td>
+                          <td>{row.endpoint}</td>
+                          <td>{bytes(row.used_bytes)} / {row.max_bytes ? bytes(row.max_bytes) : "unlimited"}</td>
+                          <td>{row.is_default ? "Default" : row.is_active ? "Active" : "Inactive"}</td>
+                          <td><button onClick={() => setPendingDelete({ kind: "provider", item: row })}>Delete</button></td>
                         </>
                       )}
                     </tr>
@@ -457,6 +509,19 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                     </label>
                   </>
                 )}
+                {mode === "providers" && (
+                  <>
+                    <label>Name<input className="glass-input" value={form.name || ""} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+                    <label>Endpoint<input className="glass-input" value={form.endpoint || ""} onChange={(event) => setForm({ ...form, endpoint: event.target.value })} /></label>
+                    <label>Region<input className="glass-input" value={form.region || ""} onChange={(event) => setForm({ ...form, region: event.target.value })} /></label>
+                    <label>Bucket name<input className="glass-input" value={form.bucket_name || ""} onChange={(event) => setForm({ ...form, bucket_name: event.target.value })} /></label>
+                    <label>Storage limit (GB)<input className="glass-input" type="number" min="1" step="0.1" value={form.max_bytes || ""} onChange={(event) => setForm({ ...form, max_bytes: event.target.value })} /></label>
+                    <label>Access key ID<input className="glass-input" value={form.access_key_id || ""} onChange={(event) => setForm({ ...form, access_key_id: event.target.value })} /></label>
+                    <label>Secret access key<input className="glass-input" type="password" value={form.secret_access_key || ""} onChange={(event) => setForm({ ...form, secret_access_key: event.target.value })} /></label>
+                    <label className="permission-check"><input type="checkbox" checked={Boolean(form.force_path_style)} onChange={(event) => setForm({ ...form, force_path_style: event.target.checked })} /> Force path style</label>
+                    <label className="permission-check"><input type="checkbox" checked={Boolean(form.is_default)} onChange={(event) => setForm({ ...form, is_default: event.target.checked })} /> Use as default provider</label>
+                  </>
+                )}
                 <div className="modal-footer">
                   <button className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
                   <button className="btn accent" onClick={() => void submit()}>Save</button>
@@ -482,8 +547,40 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
               </section>
             </div>
           )}
+
+          {selectedObject && (
+            <div className="glass-backdrop" onClick={() => setSelectedObject(null)}>
+              <aside className="glass-modal object-properties-drawer" onClick={(event) => event.stopPropagation()}>
+                <div className="modal-head">
+                  <div><span className="eyebrow">OBJECT PROPERTIES</span><h2>{selectedObject.name}</h2></div>
+                  <button className="modal-close" onClick={() => setSelectedObject(null)}>X</button>
+                </div>
+                <dl className="object-properties-list">
+                  <div><dt>File name</dt><dd>{selectedObject.name}</dd></div>
+                  <div><dt>Size</dt><dd>{bytes(Number(selectedObject.fileSize || 0))}</dd></div>
+                  <div><dt>MIME type</dt><dd>{selectedObject.mimeType || "application/octet-stream"}</dd></div>
+                  <div><dt>Status</dt><dd>{selectedObject.status}</dd></div>
+                  <div><dt>Logical path</dt><dd>{selectedObject.logicalPath}</dd></div>
+                  <div><dt>Provider</dt><dd>{selectedObject.storageProviderId ? "S3-compatible" : "Google Drive"}</dd></div>
+                  <div><dt>Provider object</dt><dd>{selectedObject.storageKey || selectedObject.providerFileId || "-"}</dd></div>
+                  <div><dt>Created</dt><dd>{selectedObject.createdAt ? new Date(selectedObject.createdAt).toLocaleString() : "-"}</dd></div>
+                  <div><dt>Updated</dt><dd>{selectedObject.updatedAt ? new Date(selectedObject.updatedAt).toLocaleString() : "-"}</dd></div>
+                </dl>
+                {publicUrl && <label className="object-public-url">Public URL<input className="glass-input" readOnly value={publicUrl} /></label>}
+                <div className="modal-footer object-properties-actions">
+                  <a className="btn accent" href={`/api/v1/objects/${selectedObject.id}/download?bucket_id=${selectedBucket}`} target="_blank">Download</a>
+                  <button className="btn ghost" onClick={() => void generatePublicUrl()} disabled={publicUrlLoading}>{publicUrlLoading ? "Generating..." : publicUrl ? "Regenerate URL" : "Generate public URL"}</button>
+                  {publicUrl && <button className="btn ghost" onClick={() => void navigator.clipboard.writeText(publicUrl)}>Copy URL</button>}
+                </div>
+              </aside>
+            </div>
+          )}
         </main>
       </div>
     </div>
   );
 }
+
+
+
+

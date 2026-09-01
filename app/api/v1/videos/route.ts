@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { errorResponse, successResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { getSessionOrApiKey } from "@/lib/storage-api/auth";
-import { pickGoogleDriveAccount, uploadToDrive } from "@/lib/storage-api/drive-backend";
+import { uploadObjectToProvider } from "@/lib/storage-api/provider-backend";
 
 async function resolveBucket(ownerId: string, bucketId?: string | null) {
   if (!bucketId) return null;
@@ -77,20 +77,11 @@ export async function POST(request: NextRequest) {
   const size = BigInt(file.size);
   if (bucket.maxBytes && bucket.usedBytes + size > bucket.maxBytes) return errorResponse("INSUFFICIENT_STORAGE", "Bucket quota exceeded.", 409);
   try {
-    const account = await pickGoogleDriveAccount(auth.ownerId);
     const buffer = Buffer.from(await file.arrayBuffer());
-    const uploaded = await uploadToDrive(
-      auth.ownerId,
-      account.id,
-      bucket.name,
-      target.folderPath,
-      target.name,
-      file.type || "application/octet-stream",
-      buffer,
-    );
+    const uploaded = await uploadObjectToProvider({ ownerId: auth.ownerId, bucketName: bucket.name, folderPath: target.folderPath, logicalPath: target.logicalPath, filename: target.name, mimeType: file.type || "application/octet-stream", buffer }, String(form.get("storage_provider_id") || "") || null);
     const object = await (prisma as any).$transaction(async (tx: any) => {
       const created = await tx.storageObject.create({
-        data: { bucketId: bucket.id, folderId: target.folderId, name: target.name, originalName: file.name, logicalPath: target.logicalPath, mimeType: file.type || null, fileSize: size, providerAccountId: account.id, providerFileId: uploaded.id, status: "AVAILABLE" },
+        data: { bucketId: bucket.id, folderId: target.folderId, name: target.name, originalName: file.name, logicalPath: target.logicalPath, mimeType: file.type || null, fileSize: size, ...uploaded, status: "AVAILABLE" },
       });
       await tx.bucket.update({ where: { id: bucket.id }, data: { usedBytes: { increment: size } } });
       return created;
@@ -100,4 +91,5 @@ export async function POST(request: NextRequest) {
     return errorResponse("UPLOAD_FAILED", "Upload object failed.", 502);
   }
 }
+
 

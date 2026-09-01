@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { errorResponse, successResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { getSessionOrApiKey } from "@/lib/storage-api/auth";
-import { deleteDriveFolderPath, deleteFromDrive } from "@/lib/storage-api/drive-backend";
+import { deleteDriveFolderPath } from "@/lib/storage-api/drive-backend";
+import { deleteObjectFromProvider } from "@/lib/storage-api/provider-backend";
 
 async function getBucket(request: NextRequest, ownerId: string, apiBucketId?: string) {
   const bucketId = apiBucketId || request.nextUrl.searchParams.get("bucket_id");
@@ -59,15 +60,16 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const folderIds = folders.map((folder: { id: string }) => folder.id);
   const objects = await (prisma as any).storageObject.findMany({
     where: { bucketId: bucket.id, folderId: { in: folderIds }, status: { not: "DELETED" } },
-    select: { id: true, fileSize: true, providerAccountId: true, providerFileId: true },
+    select: { id: true, fileSize: true, logicalPath: true, providerAccountId: true, providerFileId: true, storageProviderId: true, storageKey: true },
   });
+  const objectPrefix = `${target.path}/`;
+  const safeObjects = objects.filter((object: any) =>
+    object.logicalPath.startsWith(objectPrefix) &&
+    (!object.storageKey || object.storageKey === object.logicalPath),
+  );
 
   await Promise.all(
-    objects.map((object: { providerAccountId: string | null; providerFileId: string | null }) =>
-      object.providerAccountId && object.providerFileId
-        ? deleteFromDrive(auth.ownerId, object.providerAccountId, object.providerFileId)
-        : Promise.resolve(),
-    ),
+    safeObjects.map((object: any) => deleteObjectFromProvider(object, auth.ownerId)),
   );
 
   const accounts = await prisma.googleDriveAccount.findMany({
@@ -80,10 +82,10 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     ),
   );
 
-  const deletedBytes = objects.reduce((sum: bigint, object: { fileSize: bigint }) => sum + object.fileSize, BigInt(0));
+  const deletedBytes = safeObjects.reduce((sum: bigint, object: { fileSize: bigint }) => sum + object.fileSize, BigInt(0));
   await (prisma as any).$transaction(async (tx: any) => {
     await tx.storageObject.updateMany({
-      where: { id: { in: objects.map((object: { id: string }) => object.id) } },
+      where: { id: { in: safeObjects.map((object: { id: string }) => object.id) } },
       data: { status: "DELETED" },
     });
     await tx.storageFolder.deleteMany({ where: { id: { in: folderIds } } });
@@ -91,6 +93,6 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
       await tx.bucket.update({ where: { id: bucket.id }, data: { usedBytes: { decrement: deletedBytes } } });
     }
   });
-  return successResponse({ deleted: true, folders: folderIds.length, objects: objects.length, deleted_bytes: Number(deletedBytes) });
+  return successResponse({ deleted: true, folders: folderIds.length, objects: safeObjects.length, deleted_bytes: Number(deletedBytes) });
 }
 

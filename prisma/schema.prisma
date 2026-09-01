@@ -16,6 +16,7 @@ model User {
   accounts            Account[]
   sessions            Session[]
   googleDriveAccounts GoogleDriveAccount[]
+  storageProviders    StorageProvider[]
   buckets             Bucket[]
   apiKeys             ApiKey[]
   customDomains       CustomDomain[]
@@ -89,6 +90,34 @@ enum ObjectStatus {
   DELETED
 }
 
+enum StorageProviderType {
+  GOOGLE_DRIVE
+  S3_COMPATIBLE
+}
+
+model StorageProvider {
+  id                 String             @id @default(cuid())
+  ownerId            String
+  type               StorageProviderType @default(S3_COMPATIBLE)
+  name               String              @db.VarChar(255)
+  endpoint           String?             @db.VarChar(500)
+  region             String?             @db.VarChar(100)
+  bucketName         String?             @db.VarChar(255)
+  maxBytes           BigInt?
+  usedBytes          BigInt             @default(0)
+  accessKeyId        String?             @db.VarChar(255)
+  secretAccessKeyEnc String?             @db.Text
+  forcePathStyle     Boolean             @default(true)
+  isDefault          Boolean             @default(false)
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  objects            StorageObject[]
+
+  @@index([ownerId, isActive, isDefault])
+}
+
 model Bucket {
   id        String   @id @default(cuid())
   ownerId   String
@@ -157,6 +186,8 @@ model StorageObject {
   fileSize          BigInt
   providerAccountId String?
   providerFileId    String?
+  storageProviderId String?
+  storageKey        String?       @db.VarChar(700)
   status            ObjectStatus @default(PENDING)
   isPublic          Boolean      @default(false)
   publicUrlToken    String?      @unique @db.VarChar(128)
@@ -164,6 +195,7 @@ model StorageObject {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   bucket            Bucket       @relation(fields: [bucketId], references: [id], onDelete: Cascade)
+  storageProvider   StorageProvider? @relation(fields: [storageProviderId], references: [id], onDelete: SetNull)
   folder            StorageFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
   @@unique([bucketId, logicalPath])
   @@index([bucketId, folderId, status])

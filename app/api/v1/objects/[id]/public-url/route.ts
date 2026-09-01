@@ -8,8 +8,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const auth = await getSessionOrApiKey(request, "file:read");
   if ("error" in auth) return errorResponse(auth.error, "Unauthorized", auth.status);
   const { id } = await context.params;
-  const object = await (prisma as any).storageObject.findFirst({ where: { id, ...(auth.bucketId ? { bucketId: auth.bucketId } : {}), bucket: { ownerId: auth.ownerId } } });
+  const object = await (prisma as any).storageObject.findFirst({ where: { id, ...(auth.bucketId ? { bucketId: auth.bucketId } : {}), bucket: { ownerId: auth.ownerId } }, include: { bucket: { select: { slug: true, isPublic: true } } } });
   if (!object) return errorResponse("NOT_FOUND", "Object not found.", 404);
+  if (object.bucket.isPublic) {
+    const url = `${request.nextUrl.origin}/s3/${encodeURIComponent(object.bucket.slug)}/${object.logicalPath.split("/").map(encodeURIComponent).join("/")}`;
+    return successResponse({ url, direct: true, lifetime: true });
+  }
   const token = randomBytes(24).toString("hex");
   await (prisma as any).storageObject.update({ where: { id }, data: { isPublic: true, publicUrlToken: token, publicUrlExpiresAt: null } });
   const host = request.headers.get("host") || "localhost:3000";

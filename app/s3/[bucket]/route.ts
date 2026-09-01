@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { verifyS3Request } from "@/lib/storage-api/s3-auth";
-import { deleteFromDrive } from "@/lib/storage-api/drive-backend";
+import { deleteObjectFromProvider } from "@/lib/storage-api/provider-backend";
 
 function xml(body: string, status = 200) {
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>${body}`, {
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ bu
   for (const objectKey of keys) {
     const object = await (prisma as any).storageObject.findFirst({ where: { bucketId: auth.bucketId, logicalPath: objectKey } });
     if (!object) continue;
-    await deleteFromDrive(auth.ownerId, object.providerAccountId, object.providerFileId);
+    await deleteObjectFromProvider(object, auth.ownerId);
     await (prisma as any).storageObject.update({ where: { id: object.id }, data: { status: "DELETED" } });
     await (prisma as any).bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: object.fileSize } } });
   }

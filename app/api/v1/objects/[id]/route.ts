@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { errorResponse, successResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { getSessionOrApiKey } from "@/lib/storage-api/auth";
-import { deleteFromDrive } from "@/lib/storage-api/drive-backend";
+import { deleteObjectFromProvider } from "@/lib/storage-api/provider-backend";
 
 async function findObject(id: string, ownerId: string, bucketId?: string) {
   return (prisma as any).storageObject.findFirst({ where: { id, ...(bucketId ? { bucketId } : {}), bucket: { ownerId } } });
@@ -38,7 +38,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const { id } = await context.params;
   const object = await findObject(id, auth.ownerId, auth.bucketId || request.nextUrl.searchParams.get("bucket_id") || undefined);
   if (!object) return errorResponse("NOT_FOUND", "Object not found.", 404);
-  if (object.providerAccountId && object.providerFileId) await deleteFromDrive(auth.ownerId, object.providerAccountId, object.providerFileId);
+  await deleteObjectFromProvider(object, auth.ownerId);
   await (prisma as any).$transaction(async (tx: any) => {
     await tx.storageObject.update({ where: { id }, data: { status: "DELETED" } });
     await tx.bucket.update({ where: { id: object.bucketId }, data: { usedBytes: { decrement: object.fileSize } } });

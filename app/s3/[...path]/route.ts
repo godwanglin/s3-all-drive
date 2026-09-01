@@ -2,13 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db";
 import { verifyS3Request } from "@/lib/storage-api/s3-auth";
-import { pickGoogleDriveAccount, uploadToDrive, deleteFromDrive } from "@/lib/storage-api/drive-backend";
-import { fetchDriveMediaStream } from "@/lib/google-drive/direct-stream";
+import { deleteObjectFromProvider, fetchObjectFromProvider, uploadObjectToProvider } from "@/lib/storage-api/provider-backend";
 
-function xml(body: string, status = 200) {
+const publicObjectCache = new Map<string, { bucket: any; object: any; expiresAt: number }>();
+const PUBLIC_OBJECT_CACHE_TTL = 30_000;
+const PUBLIC_OBJECT_CACHE_LIMIT = 256;
+
+function xml(body: string, status = 200, headers?: Headers) {
+  const responseHeaders = headers || new Headers();
+  responseHeaders.set("Content-Type", "application/xml");
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>${body}`, {
     status,
-    headers: { "Content-Type": "application/xml; charset=utf-8" },
+    headers: responseHeaders,
   });
 }
 
@@ -76,16 +81,15 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pat
   }
 
   const buffer = Buffer.from(await request.arrayBuffer());
-  const account = await pickGoogleDriveAccount(auth.ownerId);
-  const uploaded = await uploadToDrive(
-    auth.ownerId,
-    account.id,
-    auth.bucket.name,
-    folderPath || null,
-    name,
-    request.headers.get("content-type") || "application/octet-stream",
+  const uploaded = await uploadObjectToProvider({
+    ownerId: auth.ownerId,
+    bucketName: auth.bucket.name,
+    folderPath: folderPath || null,
+    logicalPath: key,
+    filename: name,
+    mimeType: request.headers.get("content-type") || "application/octet-stream",
     buffer,
-  );
+  });
 
   const existingObject = await (prisma as any).storageObject.findFirst({
     where: { bucketId: auth.bucketId, logicalPath: key },
@@ -100,8 +104,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pat
           originalName: name,
           fileSize: BigInt(buffer.length),
           mimeType: request.headers.get("content-type") || "application/octet-stream",
-          providerAccountId: account.id,
-          providerFileId: uploaded.id,
+          ...uploaded,
           status: "AVAILABLE",
         },
       })
@@ -114,8 +117,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pat
           logicalPath: key,
           mimeType: request.headers.get("content-type") || "application/octet-stream",
           fileSize: BigInt(buffer.length),
-          providerAccountId: account.id,
-          providerFileId: uploaded.id,
+          ...uploaded,
           status: "AVAILABLE",
         },
       });
@@ -129,20 +131,60 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ pat
   }
 
   const etag = createHash("md5").update(buffer).digest("hex");
-  return new NextResponse("", {
-    status: 200,
-    headers: {
-      "Content-Length": "0",
-      ETag: `"${etag}"`,
-      "x-amz-version-id": object.id,
-    },
-  });
+  return xml(
+    `<PutObjectResult><Key>${escapeXml(key)}</Key><Bucket>${escapeXml(bucket)}</Bucket><ETag>"${etag}"</ETag></PutObjectResult>`,
+    200,
+  );
 }
 
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const { bucket: requestedBucket, key: requestedKey } = parsePath((await context.params).path);
+  const publicBucket = await (prisma as any).bucket.findFirst({
+    where: { slug: requestedBucket, isPublic: true, isActive: true },
+  });
+  if (publicBucket && requestedKey) {
+    const corsHeaders = new Headers();
+    applyCorsHeaders(corsHeaders, request, publicBucket);
+    corsHeaders.set("Vary", "Origin");
+    const cacheKey = `${publicBucket.id}:${requestedKey}`;
+    const cached = publicObjectCache.get(cacheKey);
+    const object = cached && cached.expiresAt > Date.now()
+      ? cached.object
+      : await (prisma as any).storageObject.findFirst({
+          where: { bucketId: publicBucket.id, logicalPath: requestedKey, status: "AVAILABLE" },
+        });
+    if (!object) return xml("<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>", 404, corsHeaders);
+    if (!cached || cached.expiresAt <= Date.now()) {
+      if (publicObjectCache.size >= PUBLIC_OBJECT_CACHE_LIMIT) {
+        publicObjectCache.delete(publicObjectCache.keys().next().value!);
+      }
+      publicObjectCache.set(cacheKey, { bucket: publicBucket, object, expiresAt: Date.now() + PUBLIC_OBJECT_CACHE_TTL });
+    }
+    let upstream: Response;
+    try {
+      upstream = await fetchObjectFromProvider(object, publicBucket.ownerId, request.headers.get("range"));
+    } catch {
+      return xml("<Error><Code>StorageError</Code><Message>Unable to read object</Message></Error>", 502, corsHeaders);
+    }
+    if (!upstream.ok && upstream.status !== 206) return xml("<Error><Code>StorageError</Code><Message>Unable to read object</Message></Error>", 502, corsHeaders);
+    const headers = new Headers({
+      "Content-Type": object.mimeType || "application/octet-stream",
+      "Content-Length": upstream.headers.get("content-length") || String(object.fileSize),
+      "Accept-Ranges": "bytes",
+      "Cache-Control": getStreamingCacheControl(requestedKey),
+      "Content-Disposition": `inline; filename="${object.name}"`,
+      ETag: `"${createHash("md5").update(`${object.id}:${object.updatedAt}`).digest("hex")}"`,
+      "Last-Modified": new Date(object.updatedAt).toUTCString(),
+    });
+    if (upstream.headers.get("content-range")) headers.set("Content-Range", upstream.headers.get("content-range")!);
+    applyCorsHeaders(headers, request, publicBucket);
+    headers.set("Vary", "Origin");
+    return new NextResponse(upstream.body, { status: upstream.status, headers });
+  }
+
   const auth = await verifyS3Request(request, "file:read");
   if (!auth) return xml("<Error><Code>AccessDenied</Code><Message>Access Denied</Message></Error>", 403);
-  const { bucket, key } = parsePath((await context.params).path);
+  const { bucket, key } = { bucket: requestedBucket, key: requestedKey };
   if (bucket !== auth.bucket.slug) {
     return xml("<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message></Error>", 404);
   }
@@ -169,7 +211,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   });
   if (!object) return xml("<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>", 404);
 
-  const upstream = await fetchDriveMediaStream(object.providerAccountId, auth.ownerId, object.providerFileId, request.headers.get("range"));
+  const upstream = await fetchObjectFromProvider(object, auth.ownerId, request.headers.get("range"));
   const headers = new Headers({
     "Content-Type": object.mimeType || "application/octet-stream",
     "Content-Length": upstream.headers.get("content-length") || String(object.fileSize),
@@ -183,6 +225,25 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
 }
 
 export async function HEAD(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const { bucket: requestedBucket, key: requestedKey } = parsePath((await context.params).path);
+  const publicBucket = await (prisma as any).bucket.findFirst({
+    where: { slug: requestedBucket, isPublic: true, isActive: true },
+  });
+  if (publicBucket && requestedKey) {
+    const object = await (prisma as any).storageObject.findFirst({
+      where: { bucketId: publicBucket.id, logicalPath: requestedKey, status: "AVAILABLE" },
+    });
+    const headers = new Headers();
+    applyCorsHeaders(headers, request, publicBucket);
+    headers.set("Vary", "Origin");
+    if (!object) return new NextResponse(null, { status: 404, headers });
+    headers.set("Content-Type", object.mimeType || "application/octet-stream");
+    headers.set("Content-Length", String(object.fileSize));
+    headers.set("Accept-Ranges", "bytes");
+    headers.set("Cache-Control", getStreamingCacheControl(requestedKey));
+    return new NextResponse(null, { status: 200, headers });
+  }
+
   const auth = await verifyS3Request(request, "file:read");
   if (!auth) return new NextResponse(null, { status: 403 });
   const { bucket, key } = parsePath((await context.params).path);
@@ -204,6 +265,15 @@ export async function HEAD(request: NextRequest, context: { params: Promise<{ pa
 }
 
 export async function OPTIONS(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
+  const { bucket: requestedBucket } = parsePath((await context.params).path);
+  const publicBucket = await (prisma as any).bucket.findFirst({
+    where: { slug: requestedBucket, isPublic: true, isActive: true },
+  });
+  if (publicBucket) {
+    const headers = new Headers();
+    applyCorsHeaders(headers, request, publicBucket);
+    return new NextResponse(null, { status: headers.has("Access-Control-Allow-Origin") ? 204 : 403, headers });
+  }
   const auth = await verifyS3Request(request, "file:read");
   if (!auth) return new NextResponse(null, { status: 403 });
   const { bucket } = parsePath((await context.params).path);
@@ -224,7 +294,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
     where: { bucketId: auth.bucketId, logicalPath: key },
   });
   if (object) {
-    await deleteFromDrive(auth.ownerId, object.providerAccountId, object.providerFileId);
+    await deleteObjectFromProvider(object, auth.ownerId);
     await (prisma as any).storageObject.update({ where: { id: object.id }, data: { status: "DELETED" } });
     await (prisma as any).bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: object.fileSize } } });
   }
@@ -241,7 +311,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ pa
   for (const objectKey of keys) {
     const object = await (prisma as any).storageObject.findFirst({ where: { bucketId: auth.bucketId, logicalPath: objectKey } });
     if (!object) continue;
-    await deleteFromDrive(auth.ownerId, object.providerAccountId, object.providerFileId);
+    await deleteObjectFromProvider(object, auth.ownerId);
     await (prisma as any).storageObject.update({ where: { id: object.id }, data: { status: "DELETED" } });
     await (prisma as any).bucket.update({ where: { id: auth.bucketId }, data: { usedBytes: { decrement: object.fileSize } } });
   }

@@ -95,6 +95,37 @@ body {
   border-color: rgba(239, 68, 68, 0.28);
 }
 
+.object-properties-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(460px, 100%);
+  min-height: 100%;
+  overflow: auto;
+  border-radius: 26px 0 0 26px;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.94);
+}
+
+.object-properties-list {
+  display: grid;
+  gap: 0;
+  margin: 24px 0;
+}
+
+.object-properties-list div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.object-properties-list dt { color: var(--muted); font-size: 12px; }
+.object-properties-list dd { margin: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
+.object-public-url { display: grid; gap: 8px; color: var(--muted); font-size: 12px; }
+.object-properties-actions { flex-wrap: wrap; }
+
 .explorer-glass-shell {
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr);

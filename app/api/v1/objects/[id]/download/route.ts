@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { errorResponse } from "@/lib/api-response";
 import { prisma } from "@/lib/db";
 import { getSessionOrApiKey } from "@/lib/storage-api/auth";
-import { fetchDriveMediaStream } from "@/lib/google-drive/direct-stream";
+import { fetchObjectFromProvider } from "@/lib/storage-api/provider-backend";
 
 const objectCache = new Map<string, { data: any; expiresAt: number }>();
 
@@ -20,11 +20,11 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     if (object) objectCache.set(cacheKey, { data: object, expiresAt: Date.now() + 60_000 });
   }
   if (!object || object.status !== "AVAILABLE") return errorResponse("NOT_FOUND", "Object not found.", 404);
-  if (!object.providerAccountId || !object.providerFileId) return errorResponse("STORAGE_ERROR", "Object provider data is missing.", 502);
+  if (!object.storageProviderId && (!object.providerAccountId || !object.providerFileId)) return errorResponse("STORAGE_ERROR", "Object provider data is missing.", 502);
 
   try {
     const range = request.headers.get("range");
-    const upstream = await fetchDriveMediaStream(object.providerAccountId, auth.ownerId, object.providerFileId, range);
+    const upstream = await fetchObjectFromProvider(object, auth.ownerId, range);
     if (!upstream.ok && upstream.status !== 206) return errorResponse("STORAGE_ERROR", "Unable to read object.", 502);
 
     const headers = new Headers({
