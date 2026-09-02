@@ -56,7 +56,11 @@ async function removeEmptyFolders(bucketId: string) {
   });
   for (const folder of folders) {
     const objectCount = await (prisma as any).storageObject.count({
-      where: { bucketId, folderId: folder.id, status: { not: "DELETED" } },
+      where: {
+        bucketId,
+        status: { not: "DELETED" },
+        logicalPath: { startsWith: `${folder.path}/` },
+      },
     });
     if (!objectCount) await (prisma as any).storageFolder.delete({ where: { id: folder.id } }).catch(() => undefined);
   }
