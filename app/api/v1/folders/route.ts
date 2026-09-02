@@ -43,6 +43,24 @@ export async function POST(request: NextRequest) {
   const bucketId = auth.bucketId || body.bucket_id;
   const bucket = await (prisma as any).bucket.findFirst({ where: { id: bucketId, ownerId: auth.ownerId, isActive: true } });
   if (!bucket) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
+  if (body.action === "cleanup_empty_virtual") {
+    const folders = await (prisma as any).storageFolder.findMany({
+      where: { bucketId, isVirtual: true },
+      select: { id: true },
+      orderBy: { path: "desc" },
+    });
+    let deleted = 0;
+    for (const folder of folders) {
+      const objectCount = await (prisma as any).storageObject.count({
+        where: { folderId: folder.id, status: { not: "DELETED" } },
+      });
+      if (!objectCount) {
+        await (prisma as any).storageFolder.delete({ where: { id: folder.id } }).catch(() => undefined);
+        deleted += 1;
+      }
+    }
+    return successResponse({ deleted });
+  }
   const name = String(body.name || "").trim();
   if (!name) return errorResponse("VALIDATION_ERROR", "Folder name is required.", 400);
   const parentId = body.parent_id || null;

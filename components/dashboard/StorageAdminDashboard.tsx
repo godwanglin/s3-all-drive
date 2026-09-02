@@ -190,6 +190,19 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
     }
   };
 
+  const cleanupEmptyVirtualFolders = async () => {
+    if (!selectedBucket) return;
+    try {
+      await api("/api/v1/folders", {
+        method: "POST",
+        body: JSON.stringify({ bucket_id: selectedBucket, action: "cleanup_empty_virtual" }),
+      });
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Folder cleanup failed");
+    }
+  };
+
   const generatePublicUrl = async () => {
     if (!selectedObject) return;
     setPublicUrlLoading(true);
@@ -279,6 +292,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                   placeholder="New folder name"
                 />
                 <button className="btn accent" onClick={() => void createFolder()}>Create folder</button>
+                <button className="btn ghost" onClick={() => void cleanupEmptyVirtualFolders()}>Clean empty virtual</button>
               </div>
             </div>
           )}
