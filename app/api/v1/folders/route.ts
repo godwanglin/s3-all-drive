@@ -25,10 +25,15 @@ export async function GET(request: NextRequest) {
   if (!bucketId) return errorResponse("BUCKET_NOT_FOUND", "Bucket is required.", 404);
   const bucket = await (prisma as any).bucket.findFirst({ where: { id: bucketId, ownerId: auth.ownerId, isActive: true } });
   if (!bucket) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
-  await pruneVirtualFolders(bucketId);
   const parentId = request.nextUrl.searchParams.get("parent_id");
   const folders = await (prisma as any).storageFolder.findMany({ where: { bucketId, parentId: parentId || null }, orderBy: { name: "asc" } });
-  return successResponse({ folders });
+  const foldersWithCounts = await Promise.all(folders.map(async (folder: any) => ({
+    ...folder,
+    object_count: await (prisma as any).storageObject.count({
+      where: { bucketId, logicalPath: { startsWith: `${folder.path}/` }, status: { not: "DELETED" } },
+    }),
+  })));
+  return successResponse({ folders: foldersWithCounts });
 }
 
 export async function POST(request: NextRequest) {

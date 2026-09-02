@@ -327,7 +327,7 @@ export function StorageAdminDashboard({ mode }: { mode: Mode }) {
                       <td>-</td>
                       <td>Ready</td>
                       <td className="storage-row-actions">
-                        <button onClick={() => setPendingDelete({ kind: "folder", item: folder })}>Delete</button>
+                         {folder.object_count === 0 && <button onClick={() => setPendingDelete({ kind: "folder", item: folder })}>Delete empty</button>}
                       </td>
                     </tr>
                   ))}
