@@ -37,9 +37,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await getSessionOrApiKey(request, "folder:create");
-  if ("error" in auth) return errorResponse(auth.error, "Unauthorized", auth.status);
   const body = await request.json().catch(() => ({}));
+  const auth = await getSessionOrApiKey(request, body.action === "cleanup_empty_virtual" ? "folder:delete" : "folder:create");
+  if ("error" in auth) return errorResponse(auth.error, "Unauthorized", auth.status);
   const bucketId = auth.bucketId || body.bucket_id;
   const bucket = await (prisma as any).bucket.findFirst({ where: { id: bucketId, ownerId: auth.ownerId, isActive: true } });
   if (!bucket) return errorResponse("BUCKET_NOT_FOUND", "Bucket not found.", 404);
