@@ -149,8 +149,7 @@ export async function deleteObjectFromProvider(object: any, ownerId: string) {
 }
 
 export async function deleteProviderPrefix(provider: any, prefix: string) {
-  const normalizedPrefix = normalizeStorageKey(prefix);
-  if (!normalizedPrefix.endsWith("/")) throw new Error("INVALID_STORAGE_PREFIX");
+  const normalizedPrefix = `${normalizeStorageKey(prefix)}/`;
   const client = createS3Client(provider);
   let continuationToken: string | undefined;
   do {
